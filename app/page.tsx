@@ -302,7 +302,7 @@ export default function Home() {
   };
 
   return (
-    <main>
+    <main className={source ? "has-source" : ""}>
       <header className="site-header">
         <a className="brand" href="#top" aria-label="Pixel 24 home">
           <span className="brand-mark" aria-hidden="true">
@@ -327,41 +327,74 @@ export default function Home() {
       <section className="workspace" aria-label="Pixel art generator">
         <div className="panel source-panel">
           <div className="panel-heading">
-            <span><b>1</b> SOURCE</span>
+            <span><b>1</b> {source ? "PALETTE" : "SOURCE"}</span>
             {source && <button className="text-button" type="button" onClick={reset}>CLEAR</button>}
           </div>
 
-          <div
-            className={`drop-zone ${isDragging ? "is-dragging" : ""} ${source ? "has-image" : ""}`}
-            onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
-            onDragOver={(event) => event.preventDefault()}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={handleDrop}
-          >
-            {source ? (
-              <img className="source-image" src={source} alt="Uploaded source" />
-            ) : (
+          {source ? (
+            <div className="palette-panel">
+              <div className="source-summary">
+                <img src={source} alt="Uploaded source thumbnail" />
+                <div>
+                  <strong>{fileName}</strong>
+                  <span>IMAGE LOADED · 40 COLOURS</span>
+                </div>
+                <button type="button" onClick={() => inputRef.current?.click()}>REPLACE</button>
+              </div>
+              <p className="palette-instruction">Click a colour to isolate its pixels in the output preview.</p>
+              <div className="palette-grid compact-palette" aria-label="40 available colours">
+                {PALETTE.map((color, index) => (
+                  <button
+                    type="button"
+                    key={color}
+                    className={selectedColor === color ? "is-selected" : ""}
+                    style={{ backgroundColor: color }}
+                    title={`${index + 1}: ${color}`}
+                    aria-label={`Colour ${index + 1}, ${color}${selectedColor === color ? ", highlighted" : ""}`}
+                    aria-pressed={selectedColor === color}
+                    onClick={() => setSelectedColor((current) => current === color ? null : color)}
+                  >
+                    <i>{String(index + 1).padStart(2, "0")}</i>
+                  </button>
+                ))}
+              </div>
+              <div className={`highlight-status ${selectedColor ? "is-active" : ""}`} aria-live="polite">
+                {selectedColor ? (
+                  <>
+                    <span className="selected-swatch" style={{ backgroundColor: selectedColor }} aria-hidden="true" />
+                    <strong>{selectedColor}</strong>
+                    <span>{`${selectedCount} pixel${selectedCount === 1 ? "" : "s"} highlighted`}</span>
+                    <button type="button" onClick={() => setSelectedColor(null)}>CLEAR</button>
+                  </>
+                ) : (
+                  <><b aria-hidden="true">↗</b><span>SELECT A COLOUR TO HIGHLIGHT</span></>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div
+              className={`drop-zone ${isDragging ? "is-dragging" : ""}`}
+              onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+            >
               <label className="upload-prompt" htmlFor="image-upload">
                 <span className="upload-glyph" aria-hidden="true">↗</span>
                 <strong>DROP IMAGE HERE</strong>
                 <span>or click to browse</span>
                 <small>JPG, PNG, WEBP OR GIF</small>
               </label>
-            )}
-            <input
-              ref={inputRef}
-              id="image-upload"
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif"
-              onChange={handleInput}
-            />
-          </div>
-
-          {source && (
-            <button className="replace-button" type="button" onClick={() => inputRef.current?.click()}>
-              CHOOSE ANOTHER IMAGE
-            </button>
+            </div>
           )}
+          <input
+            ref={inputRef}
+            className="file-input"
+            id="image-upload"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            onChange={handleInput}
+          />
           {error && <p className="error" role="alert">{error}</p>}
         </div>
 
@@ -457,42 +490,6 @@ export default function Home() {
             </button>
           )}
           <canvas ref={canvasRef} width="24" height="24" aria-hidden="true" />
-        </div>
-      </section>
-
-      <section className="palette-section" aria-labelledby="palette-title">
-        <div className="palette-copy">
-          <p className="eyebrow"><span>02</span> Locked colour system</p>
-          <h2 id="palette-title">Your 40-colour palette.</h2>
-          <p>Every visible pixel is matched to the nearest colour below. Click a colour to isolate its pixels in the preview.</p>
-          <div className={`highlight-status ${selectedColor ? "is-active" : ""}`} aria-live="polite">
-            {selectedColor ? (
-              <>
-                <span className="selected-swatch" style={{ backgroundColor: selectedColor }} aria-hidden="true" />
-                <strong>{selectedColor}</strong>
-                <span>{result ? `${selectedCount} pixel${selectedCount === 1 ? "" : "s"} highlighted` : "Upload an image to see matches"}</span>
-                <button type="button" onClick={() => setSelectedColor(null)}>CLEAR</button>
-              </>
-            ) : (
-              <><b aria-hidden="true">↙</b><span>SELECT A COLOUR TO HIGHLIGHT</span></>
-            )}
-          </div>
-        </div>
-        <div className="palette-grid" aria-label="40 available colours">
-          {PALETTE.map((color, index) => (
-            <button
-              type="button"
-              key={color}
-              className={selectedColor === color ? "is-selected" : ""}
-              style={{ backgroundColor: color }}
-              title={`${index + 1}: ${color}`}
-              aria-label={`Colour ${index + 1}, ${color}${selectedColor === color ? ", highlighted" : ""}`}
-              aria-pressed={selectedColor === color}
-              onClick={() => setSelectedColor((current) => current === color ? null : color)}
-            >
-              <i>{String(index + 1).padStart(2, "0")}</i>
-            </button>
-          ))}
         </div>
       </section>
 
