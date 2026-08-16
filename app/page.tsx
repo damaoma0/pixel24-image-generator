@@ -4,12 +4,19 @@ import { ChangeEvent, DragEvent, useCallback, useEffect, useRef, useState } from
 
 type FitMode = "cover" | "contain";
 type ApproximationMethod = "lab" | "weighted" | "rgb" | "dither";
+type SamplingMethod = "average" | "centre" | "random";
 
 const METHODS: Array<{ id: ApproximationMethod; label: string; detail: string }> = [
   { id: "lab", label: "PERCEPTUAL LAB", detail: "Matches colours by how different they look to the eye." },
   { id: "weighted", label: "WEIGHTED RGB", detail: "Balances red, green, and blue for a clean graphic result." },
   { id: "rgb", label: "RGB DISTANCE", detail: "Uses direct numerical distance between RGB values." },
   { id: "dither", label: "FLOYD–STEINBERG", detail: "Spreads colour error into neighbouring pixels for texture." },
+];
+
+const SAMPLING_METHODS: Array<{ id: SamplingMethod; label: string; detail: string }> = [
+  { id: "average", label: "SMOOTH AVERAGE", detail: "Blends the source box before palette matching; best for balanced detail." },
+  { id: "centre", label: "CENTRE POINT", detail: "Takes only the original pixel at the centre of each source box." },
+  { id: "random", label: "RANDOM POINT", detail: "Takes one original pixel from a seeded random position in each box." },
 ];
 
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -77,6 +84,83 @@ function findClosest(red: number, green: number, blue: number, method: Exclude<A
   return closest;
 }
 
+function seededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6D2B79F5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function drawSampledImage(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  fit: FitMode,
+  sampling: SamplingMethod,
+  seed: number,
+) {
+  ctx.clearRect(0, 0, 24, 24);
+
+  const crop = Math.min(image.naturalWidth, image.naturalHeight);
+  const containScale = Math.min(24 / image.naturalWidth, 24 / image.naturalHeight);
+  const source = fit === "cover"
+    ? { x: (image.naturalWidth - crop) / 2, y: (image.naturalHeight - crop) / 2, width: crop, height: crop }
+    : { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight };
+  const destination = fit === "cover"
+    ? { x: 0, y: 0, width: 24, height: 24 }
+    : {
+        x: (24 - image.naturalWidth * containScale) / 2,
+        y: (24 - image.naturalHeight * containScale) / 2,
+        width: image.naturalWidth * containScale,
+        height: image.naturalHeight * containScale,
+      };
+
+  if (sampling === "average") {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(
+      image,
+      source.x,
+      source.y,
+      source.width,
+      source.height,
+      destination.x,
+      destination.y,
+      destination.width,
+      destination.height,
+    );
+    return;
+  }
+
+  const random = seededRandom(seed);
+  ctx.imageSmoothingEnabled = false;
+
+  for (let outputY = 0; outputY < 24; outputY += 1) {
+    for (let outputX = 0; outputX < 24; outputX += 1) {
+      if (
+        outputX + 1 <= destination.x
+        || outputX >= destination.x + destination.width
+        || outputY + 1 <= destination.y
+        || outputY >= destination.y + destination.height
+      ) continue;
+
+      const uStart = Math.max(0, (outputX - destination.x) / destination.width);
+      const uEnd = Math.min(1, (outputX + 1 - destination.x) / destination.width);
+      const vStart = Math.max(0, (outputY - destination.y) / destination.height);
+      const vEnd = Math.min(1, (outputY + 1 - destination.y) / destination.height);
+      const u = sampling === "centre" ? (uStart + uEnd) / 2 : uStart + (uEnd - uStart) * random();
+      const v = sampling === "centre" ? (vStart + vEnd) / 2 : vStart + (vEnd - vStart) * random();
+      const sourceX = Math.max(0, Math.min(image.naturalWidth - 1, Math.floor(source.x + u * source.width)));
+      const sourceY = Math.max(0, Math.min(image.naturalHeight - 1, Math.floor(source.y + v * source.height)));
+
+      ctx.drawImage(image, sourceX, sourceY, 1, 1, outputX, outputY, 1, 1);
+    }
+  }
+}
+
 function applyPalette(ctx: CanvasRenderingContext2D, method: ApproximationMethod) {
   const imageData = ctx.getImageData(0, 0, 24, 24);
   const mappedColors = Array<string>(24 * 24).fill("");
@@ -139,6 +223,8 @@ export default function Home() {
   const [fileName, setFileName] = useState("pixel-24");
   const [fit, setFit] = useState<FitMode>("cover");
   const [method, setMethod] = useState<ApproximationMethod>("lab");
+  const [sampling, setSampling] = useState<SamplingMethod>("average");
+  const [randomSeed, setRandomSeed] = useState(1729);
   const [pixelColors, setPixelColors] = useState<string[]>([]);
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -146,7 +232,13 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const pixelate = useCallback((imageSource: string, mode: FitMode, approximation: ApproximationMethod) => {
+  const pixelate = useCallback((
+    imageSource: string,
+    mode: FitMode,
+    approximation: ApproximationMethod,
+    samplingMethod: SamplingMethod,
+    sampleSeed: number,
+  ) => {
     if (!imageSource) return;
 
     const image = new Image();
@@ -157,22 +249,7 @@ export default function Home() {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      ctx.clearRect(0, 0, 24, 24);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-
-      if (mode === "cover") {
-        const crop = Math.min(image.naturalWidth, image.naturalHeight);
-        const sx = (image.naturalWidth - crop) / 2;
-        const sy = (image.naturalHeight - crop) / 2;
-        ctx.drawImage(image, sx, sy, crop, crop, 0, 0, 24, 24);
-      } else {
-        const scale = Math.min(24 / image.naturalWidth, 24 / image.naturalHeight);
-        const width = image.naturalWidth * scale;
-        const height = image.naturalHeight * scale;
-        ctx.drawImage(image, (24 - width) / 2, (24 - height) / 2, width, height);
-      }
-
+      drawSampledImage(ctx, image, mode, samplingMethod, sampleSeed);
       setPixelColors(applyPalette(ctx, approximation));
       setResult(canvas.toDataURL("image/png"));
     };
@@ -180,13 +257,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    pixelate(source, fit, method);
-  }, [source, fit, method, pixelate]);
+    pixelate(source, fit, method, sampling, randomSeed);
+  }, [source, fit, method, sampling, randomSeed, pixelate]);
 
   const selectedCount = selectedColor
     ? pixelColors.filter((color) => color === selectedColor).length
     : 0;
   const activeMethod = METHODS.find((option) => option.id === method) ?? METHODS[0];
+  const activeSampling = SAMPLING_METHODS.find((option) => option.id === sampling) ?? SAMPLING_METHODS[0];
 
   const loadFile = (file?: File) => {
     if (!file) return;
@@ -321,7 +399,31 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="method-control">
+          <div className="method-control sampling-control">
+            <label htmlFor="sampling-method">SAMPLING</label>
+            <div className="select-wrap">
+              <select
+                id="sampling-method"
+                value={sampling}
+                onChange={(event) => setSampling(event.target.value as SamplingMethod)}
+              >
+                {SAMPLING_METHODS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+              <span aria-hidden="true">⌄</span>
+            </div>
+            <p>{activeSampling.detail}</p>
+            {sampling === "random" && (
+              <button
+                className="resample-button"
+                type="button"
+                onClick={() => setRandomSeed((current) => (Math.imul(current, 1664525) + 1013904223) >>> 0)}
+              >
+                NEW RANDOM SAMPLE <b aria-hidden="true">↻</b>
+              </button>
+            )}
+          </div>
+
+          <div className="method-control approximation-control">
             <label htmlFor="approximation-method">APPROXIMATION</label>
             <div className="select-wrap">
               <select

@@ -180,6 +180,9 @@ h1 em { color: transparent; font-style: normal; -webkit-text-stroke: 2px var(--i
 
 .method-control label { font: 800 9px/1 "Courier New", monospace; letter-spacing: .06em; }
 .method-control p { grid-column: 2; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.resample-button { grid-column: 2; justify-self: start; padding: 8px 10px; border: 1px solid var(--ink); color: var(--ink); background: var(--acid); font: 800 8px/1 "Courier New", monospace; letter-spacing: .04em; cursor: pointer; box-shadow: 2px 2px 0 var(--ink); }
+.resample-button:hover { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--ink); }
+.resample-button b { margin-left: 5px; font-size: 13px; }
 .select-wrap { position: relative; }
 .select-wrap select { width: 100%; appearance: none; padding: 10px 34px 10px 11px; border: 1px solid var(--ink); border-radius: 0; color: var(--paper); background: var(--ink); font: 800 9px/1 "Courier New", monospace; letter-spacing: .04em; cursor: pointer; }
 .select-wrap span { position: absolute; top: 50%; right: 11px; color: var(--acid); font-size: 15px; transform: translateY(-58%); pointer-events: none; }
@@ -283,6 +286,7 @@ footer span { margin-left: 6px; color: var(--acid); -webkit-text-stroke: 1px var
   .control-label { display: none; }
   .method-control { grid-template-columns: 1fr; }
   .method-control p { grid-column: 1; }
+  .resample-button { grid-column: 1; }
   .palette-grid { grid-template-columns: repeat(8, 1fr); }
   footer { flex-direction: column; gap: 8px; }
 }
