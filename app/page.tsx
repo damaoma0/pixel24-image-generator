@@ -304,11 +304,11 @@ export default function Home() {
   return (
     <main className={source ? "has-source" : ""}>
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="Pixel 24 home">
+        <a className="brand" href="#top" aria-label="明日方舟拼豆生成器首页">
           <span className="brand-mark" aria-hidden="true">
             <i /><i /><i /><i /><i /><i /><i /><i /><i />
           </span>
-          <span>PIXEL/24</span>
+          <span>明日方舟拼豆生成器</span>
         </a>
         <span className="header-note">40-COLOUR LOCKED · LOCAL ONLY</span>
       </header>
@@ -324,7 +324,7 @@ export default function Home() {
         </p>
       </section>
 
-      <section className="workspace" aria-label="Pixel art generator">
+      <section className="workspace" aria-label="明日方舟拼豆生成器">
         <div className="panel source-panel">
           <div className="panel-heading">
             <span><b>1</b> {source ? "PALETTE" : "SOURCE"}</span>

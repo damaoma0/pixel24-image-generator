@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import "./globals.css";
 
-const title = "Pixel/24 — 24 × 24 Image Generator";
+const title = "明日方舟拼豆生成器";
 const description = "Turn any image into a downloadable 24 × 24 pixel PNG, privately in your browser.";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -19,7 +19,7 @@ export async function generateMetadata(): Promise<Metadata> {
       title,
       description,
       type: "website",
-      images: [{ url: `${origin}/og-palette.png`, width: 1536, height: 1024, alt: "Pixel/24 40-colour image generator" }],
+      images: [{ url: `${origin}/og-palette.png`, width: 1536, height: 1024, alt: "明日方舟拼豆生成器的40色调色板" }],
     },
     twitter: {
       card: "summary_large_image",

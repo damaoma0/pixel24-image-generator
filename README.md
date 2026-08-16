@@ -1,4 +1,4 @@
-# Pixel/24
+# 明日方舟拼豆生成器
 
 Turn any image into a true 24 × 24 PNG constrained to a fixed 40-colour palette. Processing happens entirely in the browser, so uploaded images never leave the device.
 
