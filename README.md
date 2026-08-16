@@ -8,7 +8,7 @@ Turn any image into a true 24 × 24 PNG constrained to a fixed 40-colour palette
 - Exact 24 × 24 PNG output
 - Fixed 40-colour nearest-colour matching
 - Four approximation methods: Perceptual Lab, weighted RGB, RGB distance, and Floyd–Steinberg dithering
-- Three source sampling modes: smooth average, centre point, and seeded random point
+- Six source sampling modes: smooth average, bilinear, bicubic, Lanczos 3, centre point, and seeded random point
 - Click-to-highlight palette colours with an exact pixel count
 - Compact post-upload layout that replaces the source panel with the interactive palette
 - Crop and contain modes

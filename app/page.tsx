@@ -4,7 +4,8 @@ import { ChangeEvent, DragEvent, useCallback, useEffect, useRef, useState } from
 
 type FitMode = "cover" | "contain";
 type ApproximationMethod = "lab" | "weighted" | "rgb" | "dither";
-type SamplingMethod = "average" | "centre" | "random";
+type SamplingMethod = "average" | "bilinear" | "bicubic" | "lanczos" | "centre" | "random";
+type KernelSamplingMethod = Extract<SamplingMethod, "bilinear" | "bicubic" | "lanczos">;
 
 const METHODS: Array<{ id: ApproximationMethod; label: string; detail: string }> = [
   { id: "lab", label: "PERCEPTUAL LAB", detail: "Matches colours by how different they look to the eye." },
@@ -13,10 +14,13 @@ const METHODS: Array<{ id: ApproximationMethod; label: string; detail: string }>
   { id: "dither", label: "FLOYD–STEINBERG", detail: "Spreads colour error into neighbouring pixels for texture." },
 ];
 
-const SAMPLING_METHODS: Array<{ id: SamplingMethod; label: string; detail: string }> = [
-  { id: "average", label: "SMOOTH AVERAGE", detail: "Blends the source box before palette matching; best for balanced detail." },
-  { id: "centre", label: "CENTRE POINT", detail: "Takes only the original pixel at the centre of each source box." },
-  { id: "random", label: "RANDOM POINT", detail: "Takes one original pixel from a seeded random position in each box." },
+const SAMPLING_METHODS: Array<{ id: SamplingMethod; label: string; detail: string; family: "antialias" | "point" }> = [
+  { id: "average", label: "SMOOTH AVERAGE", detail: "Uses the browser’s high-quality area smoothing for a soft, balanced result.", family: "antialias" },
+  { id: "bilinear", label: "BILINEAR", detail: "Uses a soft triangle filter to reduce jagged edges and high-frequency noise.", family: "antialias" },
+  { id: "bicubic", label: "BICUBIC", detail: "Balances smooth edges with stronger contrast and clearer small features.", family: "antialias" },
+  { id: "lanczos", label: "LANCZOS 3", detail: "Produces the sharpest antialiased result and preserves the most fine detail.", family: "antialias" },
+  { id: "centre", label: "CENTRE POINT", detail: "Takes only the original pixel at the centre of each source box.", family: "point" },
+  { id: "random", label: "RANDOM POINT", detail: "Takes one original pixel from a seeded random position in each box.", family: "point" },
 ];
 
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -95,6 +99,144 @@ function seededRandom(seed: number) {
   };
 }
 
+const RESAMPLE_KERNELS: Record<KernelSamplingMethod, { support: number; sample: (distance: number) => number }> = {
+  bilinear: {
+    support: 1,
+    sample: (distance) => Math.max(0, 1 - Math.abs(distance)),
+  },
+  bicubic: {
+    support: 2,
+    sample: (distance) => {
+      const x = Math.abs(distance);
+      if (x <= 1) return 1.5 * x ** 3 - 2.5 * x ** 2 + 1;
+      if (x < 2) return -0.5 * x ** 3 + 2.5 * x ** 2 - 4 * x + 2;
+      return 0;
+    },
+  },
+  lanczos: {
+    support: 3,
+    sample: (distance) => {
+      const x = Math.abs(distance);
+      if (x === 0) return 1;
+      if (x >= 3) return 0;
+      const piX = Math.PI * x;
+      return (Math.sin(piX) / piX) * (Math.sin(piX / 3) / (piX / 3));
+    },
+  },
+};
+
+function makeResampleWeights(sourceSize: number, targetSize: number, method: KernelSamplingMethod) {
+  const kernel = RESAMPLE_KERNELS[method];
+  const sourcePerTarget = sourceSize / targetSize;
+  const filterScale = Math.max(1, sourcePerTarget);
+
+  return Array.from({ length: targetSize }, (_, targetIndex) => {
+    const centre = (targetIndex + 0.5) * sourcePerTarget - 0.5;
+    const radius = kernel.support * filterScale;
+    const start = Math.max(0, Math.ceil(centre - radius));
+    const end = Math.min(sourceSize - 1, Math.floor(centre + radius));
+    const weights: Array<{ index: number; weight: number }> = [];
+    let total = 0;
+
+    for (let sourceIndex = start; sourceIndex <= end; sourceIndex += 1) {
+      const weight = kernel.sample((sourceIndex - centre) / filterScale);
+      if (weight === 0) continue;
+      weights.push({ index: sourceIndex, weight });
+      total += weight;
+    }
+
+    if (Math.abs(total) < 1e-8) {
+      return [{ index: Math.max(0, Math.min(sourceSize - 1, Math.round(centre))), weight: 1 }];
+    }
+
+    return weights.map(({ index, weight }) => ({ index, weight: weight / total }));
+  });
+}
+
+function drawKernelSampledImage(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  source: { x: number; y: number; width: number; height: number },
+  destination: { x: number; y: number; width: number; height: number },
+  method: KernelSamplingMethod,
+) {
+  const maxSourceDimension = 1024;
+  const sourceScale = Math.min(1, maxSourceDimension / Math.max(source.width, source.height));
+  const sourceWidth = Math.max(1, Math.round(source.width * sourceScale));
+  const sourceHeight = Math.max(1, Math.round(source.height * sourceScale));
+  const targetWidth = Math.max(1, Math.min(24, Math.round(destination.width)));
+  const targetHeight = Math.max(1, Math.min(24, Math.round(destination.height)));
+
+  const sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = sourceWidth;
+  sourceCanvas.height = sourceHeight;
+  const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+  if (!sourceContext) return false;
+
+  sourceContext.imageSmoothingEnabled = true;
+  sourceContext.imageSmoothingQuality = "high";
+  sourceContext.drawImage(
+    image,
+    source.x,
+    source.y,
+    source.width,
+    source.height,
+    0,
+    0,
+    sourceWidth,
+    sourceHeight,
+  );
+
+  const sourcePixels = sourceContext.getImageData(0, 0, sourceWidth, sourceHeight).data;
+  const horizontalWeights = makeResampleWeights(sourceWidth, targetWidth, method);
+  const verticalWeights = makeResampleWeights(sourceHeight, targetHeight, method);
+  const horizontal = new Float32Array(targetWidth * sourceHeight * 4);
+
+  for (let y = 0; y < sourceHeight; y += 1) {
+    for (let targetX = 0; targetX < targetWidth; targetX += 1) {
+      const targetIndex = (y * targetWidth + targetX) * 4;
+      for (const { index: sourceX, weight } of horizontalWeights[targetX]) {
+        const sourceIndex = (y * sourceWidth + sourceX) * 4;
+        const alpha = sourcePixels[sourceIndex + 3] / 255;
+        horizontal[targetIndex] += sourcePixels[sourceIndex] * alpha * weight;
+        horizontal[targetIndex + 1] += sourcePixels[sourceIndex + 1] * alpha * weight;
+        horizontal[targetIndex + 2] += sourcePixels[sourceIndex + 2] * alpha * weight;
+        horizontal[targetIndex + 3] += alpha * weight;
+      }
+    }
+  }
+
+  const output = ctx.createImageData(targetWidth, targetHeight);
+  for (let targetY = 0; targetY < targetHeight; targetY += 1) {
+    for (let x = 0; x < targetWidth; x += 1) {
+      const outputIndex = (targetY * targetWidth + x) * 4;
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      let alpha = 0;
+
+      for (const { index: sourceY, weight } of verticalWeights[targetY]) {
+        const horizontalIndex = (sourceY * targetWidth + x) * 4;
+        red += horizontal[horizontalIndex] * weight;
+        green += horizontal[horizontalIndex + 1] * weight;
+        blue += horizontal[horizontalIndex + 2] * weight;
+        alpha += horizontal[horizontalIndex + 3] * weight;
+      }
+
+      const visibleAlpha = Math.max(0, Math.min(1, alpha));
+      output.data[outputIndex] = visibleAlpha > 1e-6 ? Math.max(0, Math.min(255, Math.round(red / alpha))) : 0;
+      output.data[outputIndex + 1] = visibleAlpha > 1e-6 ? Math.max(0, Math.min(255, Math.round(green / alpha))) : 0;
+      output.data[outputIndex + 2] = visibleAlpha > 1e-6 ? Math.max(0, Math.min(255, Math.round(blue / alpha))) : 0;
+      output.data[outputIndex + 3] = Math.round(visibleAlpha * 255);
+    }
+  }
+
+  const targetX = Math.max(0, Math.min(24 - targetWidth, Math.round(destination.x + (destination.width - targetWidth) / 2)));
+  const targetY = Math.max(0, Math.min(24 - targetHeight, Math.round(destination.y + (destination.height - targetHeight) / 2)));
+  ctx.putImageData(output, targetX, targetY);
+  return true;
+}
+
 function drawSampledImage(
   ctx: CanvasRenderingContext2D,
   image: HTMLImageElement,
@@ -132,6 +274,15 @@ function drawSampledImage(
       destination.width,
       destination.height,
     );
+    return;
+  }
+
+  if (sampling === "bilinear" || sampling === "bicubic" || sampling === "lanczos") {
+    if (drawKernelSampledImage(ctx, image, source, destination, sampling)) return;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, source.x, source.y, source.width, source.height, destination.x, destination.y, destination.width, destination.height);
     return;
   }
 
@@ -433,14 +584,23 @@ export default function Home() {
           </div>
 
           <div className="method-control sampling-control">
-            <label htmlFor="sampling-method">SAMPLING</label>
+            <label htmlFor="sampling-method">SAMPLING / AA</label>
             <div className="select-wrap">
               <select
                 id="sampling-method"
                 value={sampling}
                 onChange={(event) => setSampling(event.target.value as SamplingMethod)}
               >
-                {SAMPLING_METHODS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                <optgroup label="ANTI-ALIASED">
+                  {SAMPLING_METHODS.filter((option) => option.family === "antialias").map((option) => (
+                    <option key={option.id} value={option.id}>{option.label}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="SINGLE-POINT">
+                  {SAMPLING_METHODS.filter((option) => option.family === "point").map((option) => (
+                    <option key={option.id} value={option.id}>{option.label}</option>
+                  ))}
+                </optgroup>
               </select>
               <span aria-hidden="true">⌄</span>
             </div>
